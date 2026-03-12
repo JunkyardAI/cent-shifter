@@ -1,139 +1,80 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Security Policy for Electron/Web: Allow scripts from self and cdnjs/tailwind -->
-    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.tailwindcss.com;">
-    
-    <title>PrecisionShift | Artifact-Free Audio Sampler</title>
-    
-    <!-- Dependencies -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
-    <!-- Local Styles -->
-    <link rel="stylesheet" href="styles/main.css">
-</head>
-<body class="bg-gray-900 text-gray-100 min-h-screen font-sans selection:bg-blue-500 selection:text-white flex flex-col items-center justify-center p-4">
+/**
+ * Utility functions for Audio Processing
+ * (Global scope for Electron compatibility without bundlers)
+ */
 
-    <!-- Main Container -->
-    <div class="w-full max-w-3xl glass-panel rounded-2xl shadow-2xl overflow-hidden relative">
-        
-        <!-- Header -->
-        <div class="p-6 border-b border-gray-700 flex justify-between items-center bg-gray-800/50">
-            <div class="flex items-center gap-3">
-                <div class="w-3 h-3 rounded-full bg-blue-500 animate-pulse"></div>
-                <h1 class="text-xl font-bold tracking-wider neon-text">PRECISION<span class="text-blue-400">SHIFT</span></h1>
-            </div>
-            <div class="text-xs text-gray-400 bg-gray-900 px-3 py-1 rounded-full border border-gray-700">
-                <i class="fas fa-wave-square mr-1"></i> Resampling Engine
-            </div>
-        </div>
+function formatTime(seconds) {
+    if (!seconds && seconds !== 0) return "0:00";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
-        <!-- Visualizer Area -->
-        <div class="relative h-48 bg-gray-950 w-full group" id="drop-zone">
-            <canvas id="waveform-canvas" class="w-full h-full opacity-80"></canvas>
-            
-            <!-- Empty State / Drop Message -->
-            <div id="upload-message" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none transition-opacity duration-300">
-                <i class="fas fa-cloud-upload-alt text-4xl text-gray-600 mb-3 group-hover:text-blue-500 transition-colors"></i>
-                <p class="text-gray-400 text-sm">Drag & drop audio file or click to load</p>
-            </div>
+function bufferToWave(abuffer, len) {
+    const numOfChan = abuffer.numberOfChannels;
+    const length = len * numOfChan * 2 + 44;
+    const buffer = new ArrayBuffer(length);
+    const view = new DataView(buffer);
+    const channels = [];
+    let i;
+    let sample;
+    let offset = 0;
+    let pos = 0;
 
-            <!-- Playhead Overlay -->
-            <div id="playhead" class="absolute top-0 bottom-0 w-0.5 bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.8)] hidden left-0 pointer-events-none"></div>
-            
-            <!-- Hidden Input -->
-            <input type="file" id="file-input" accept="audio/*" class="absolute inset-0 opacity-0 cursor-pointer" />
-        </div>
+    // write WAV header
+    setUint32(0x46464952); // "RIFF"
+    setUint32(length - 8); // file length - 8
+    setUint32(0x45564157); // "WAVE"
 
-        <!-- Controls -->
-        <div class="p-8 space-y-8">
+    setUint32(0x20746d66); // "fmt " chunk
+    setUint32(16); // length = 16
+    setUint16(1); // PCM (uncompressed)
+    setUint16(numOfChan);
+    setUint32(abuffer.sampleRate);
+    setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+    setUint16(numOfChan * 2); // block-align
+    setUint16(16); // 16-bit (hardcoded in this loop)
 
-            <!-- Pitch Controls -->
-            <div class="space-y-6">
-                <!-- Main Display -->
-                <div class="flex justify-between items-end mb-2">
-                    <label class="text-xs font-bold text-blue-400 uppercase tracking-widest">Total Shift</label>
-                    <div class="text-4xl font-mono font-light text-white tabular-nums">
-                        <span id="total-cents-display">0</span> <span class="text-sm text-gray-500">cents</span>
-                    </div>
-                </div>
+    setUint32(0x61746164); // "data" - chunk
+    setUint32(length - pos - 4); // chunk length
 
-                <!-- Coarse (Semitones) -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs text-gray-400">
-                        <span>-24 Semitones</span>
-                        <span class="font-bold text-white">Semitones (Coarse)</span>
-                        <span>+24 Semitones</span>
-                    </div>
-                    <input type="range" id="semitone-slider" min="-24" max="24" value="0" step="1">
-                </div>
+    // Write interleaved data
+    for(i = 0; i < abuffer.numberOfChannels; i++)
+        channels.push(abuffer.getChannelData(i));
 
-                <!-- Fine (Cents) -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs text-gray-400">
-                        <span>-100 cents</span>
-                        <span class="font-bold text-white">Cents (Fine)</span>
-                        <span>+100 cents</span>
-                    </div>
-                    <input type="range" id="cents-slider" min="-100" max="100" value="0" step="1">
-                </div>
+    while(pos < len) {
+        for(i = 0; i < numOfChan; i++) {
+            // clamp
+            sample = Math.max(-1, Math.min(1, channels[i][pos])); 
+            // scale to 16-bit
+            sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0; 
+            view.setInt16(44 + offset, sample, true); 
+            offset += 2;
+        }
+        pos++;
+    }
 
-                <!-- Direct Input -->
-                <div class="flex items-center gap-4 pt-2">
-                    <div class="flex-1 bg-gray-800 rounded-lg p-3 flex items-center justify-between border border-gray-700">
-                        <span class="text-xs text-gray-400">Exact Cents</span>
-                        <input type="number" id="manual-cents" value="0" class="bg-transparent text-right text-blue-400 font-mono focus:outline-none w-24" placeholder="0">
-                    </div>
-                    <button id="reset-pitch" class="p-3 rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-400 transition-colors" title="Reset Pitch">
-                        <i class="fas fa-undo"></i>
-                    </button>
-                </div>
-            </div>
+    // Helpers
+    function setUint16(data) {
+        view.setUint16(pos, data, true);
+        pos += 2;
+    }
 
-            <!-- Transport Controls -->
-            <div class="grid grid-cols-12 gap-4 border-t border-gray-800 pt-6">
-                <!-- Info Display -->
-                <div class="col-span-12 md:col-span-5 flex flex-col justify-center space-y-1">
-                    <div id="filename-display" class="text-sm font-medium text-white truncate">No file loaded</div>
-                    <div class="text-xs text-gray-500 flex gap-4">
-                        <span id="duration-display">00:00</span>
-                        <span id="rate-display">1.00x Speed</span>
-                    </div>
-                </div>
+    function setUint32(data) {
+        view.setUint32(pos, data, true);
+        pos += 4;
+    }
 
-                <!-- Buttons -->
-                <div class="col-span-12 md:col-span-7 flex justify-end items-center gap-3">
-                    <button id="export-btn" class="px-5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                        <i class="fas fa-download mr-2"></i> Export
-                    </button>
+    return new Blob([buffer], { type: "audio/wav" });
+}
 
-                    <div class="w-px h-8 bg-gray-700 mx-2"></div>
-
-                    <button id="loop-btn" class="w-10 h-10 rounded-full border border-gray-600 text-gray-500 hover:text-blue-400 hover:border-blue-400 flex items-center justify-center transition-all">
-                        <i class="fas fa-infinity"></i>
-                    </button>
-                    
-                    <button id="stop-btn" class="px-6 py-2 rounded-lg bg-gray-800 hover:bg-red-900/30 text-gray-300 hover:text-red-400 border border-gray-700 hover:border-red-500/50 transition-all font-medium">
-                        <i class="fas fa-stop mr-2"></i> Stop
-                    </button>
-
-                    <button id="play-btn" class="px-8 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/50 transition-all font-bold flex items-center disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                        <i class="fas fa-play mr-2"></i> Play
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Info Footer -->
-    <div class="mt-8 text-center text-gray-500 text-xs max-w-lg">
-        <p class="mb-2"><strong class="text-gray-400">Note on Artifacts:</strong> This app uses <span class="text-blue-400">Resampling</span> (like a tape machine or vinyl). This is the only method that guarantees zero granular artifacts. Pitching up will shorten the sample, pitching down will lengthen it.</p>
-    </div>
-
-    <!-- Main Logic: Type Module allows ES6 Imports -->
-    <script type="module" src="js/renderer.js"></script>
-</body>
-</html>
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+}
