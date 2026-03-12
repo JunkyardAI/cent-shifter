@@ -1,80 +1,529 @@
-/**
- * Utility functions for Audio Processing
- * (Global scope for Electron compatibility without bundlers)
- */
-
-function formatTime(seconds) {
-    if (!seconds && seconds !== 0) return "0:00";
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function bufferToWave(abuffer, len) {
-    const numOfChan = abuffer.numberOfChannels;
-    const length = len * numOfChan * 2 + 44;
-    const buffer = new ArrayBuffer(length);
-    const view = new DataView(buffer);
-    const channels = [];
-    let i;
-    let sample;
-    let offset = 0;
-    let pos = 0;
-
-    // write WAV header
-    setUint32(0x46464952); // "RIFF"
-    setUint32(length - 8); // file length - 8
-    setUint32(0x45564157); // "WAVE"
-
-    setUint32(0x20746d66); // "fmt " chunk
-    setUint32(16); // length = 16
-    setUint16(1); // PCM (uncompressed)
-    setUint16(numOfChan);
-    setUint32(abuffer.sampleRate);
-    setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-    setUint16(numOfChan * 2); // block-align
-    setUint16(16); // 16-bit (hardcoded in this loop)
-
-    setUint32(0x61746164); // "data" - chunk
-    setUint32(length - pos - 4); // chunk length
-
-    // Write interleaved data
-    for(i = 0; i < abuffer.numberOfChannels; i++)
-        channels.push(abuffer.getChannelData(i));
-
-    while(pos < len) {
-        for(i = 0; i < numOfChan; i++) {
-            // clamp
-            sample = Math.max(-1, Math.min(1, channels[i][pos])); 
-            // scale to 16-bit
-            sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0; 
-            view.setInt16(44 + offset, sample, true); 
-            offset += 2;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Precise Cent Shifter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* * For your Electron modular setup, move this block to styles/style.css 
+         */
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden; /* Prevent scrollbar in desktop app */
         }
-        pos++;
-    }
 
-    // Helpers
-    function setUint16(data) {
-        view.setUint16(pos, data, true);
-        pos += 2;
-    }
+        .drop-zone {
+            transition: all 0.2s ease;
+            border: 2px dashed #334155;
+        }
 
-    function setUint32(data) {
-        view.setUint32(pos, data, true);
-        pos += 4;
-    }
+        .drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: rgba(59, 130, 246, 0.1);
+        }
 
-    return new Blob([buffer], { type: "audio/wav" });
-}
+        /* Custom Slider Styling */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
 
-function downloadBlob(blob, filename) {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-}
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 20px;
+            width: 20px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -8px;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #334155;
+            border-radius: 2px;
+        }
+
+        input[type=range]:focus {
+            outline: none;
+        }
+        
+        canvas {
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shadow-md z-10">
+        <div class="flex items-center gap-2">
+            <i data-lucide="waves" class="text-blue-500"></i>
+            <h1 class="text-xl font-bold tracking-wide">Precise Cent Shifter</h1>
+        </div>
+        <div class="text-sm text-slate-400 font-mono" id="timeDisplay">0:00 / 0:00</div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col p-6 gap-6 overflow-hidden">
+        
+        <!-- Drop Zone & Visualizer Container -->
+        <div class="relative flex-1 bg-slate-800/50 rounded-xl border border-slate-700 flex flex-col overflow-hidden shadow-inner drop-zone" id="dropZone">
+            
+            <!-- Default State -->
+            <div id="dropPrompt" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 pointer-events-none transition-opacity duration-300">
+                <i data-lucide="upload-cloud" class="w-16 h-16 mb-4 text-slate-500"></i>
+                <p class="text-lg font-medium text-slate-300">Drag & Drop Audio File</p>
+                <p class="text-sm mt-1">or click to browse</p>
+            </div>
+
+            <!-- Canvas Visualizer -->
+            <canvas id="visualizer" class="w-full h-full opacity-0 transition-opacity duration-500"></canvas>
+            
+            <input type="file" id="fileInput" class="hidden" accept="audio/*">
+        </div>
+
+        <!-- Controls Area -->
+        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-lg flex flex-col gap-6 opacity-50 pointer-events-none transition-opacity duration-300" id="controlsArea">
+            
+            <!-- Cent Shifter Slider -->
+            <div class="flex flex-col gap-2">
+                <div class="flex justify-between items-end">
+                    <label class="text-sm font-semibold text-slate-300">Pitch Shift (Cents)</label>
+                    <div class="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-md border border-slate-700">
+                        <input type="number" id="centInput" class="bg-transparent text-right w-16 text-blue-400 font-mono focus:outline-none" value="0" min="-2400" max="2400">
+                        <span class="text-slate-500 text-xs font-mono">¢</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span class="text-xs text-slate-500 font-mono w-8 text-right">-2400</span>
+                    <input type="range" id="centSlider" min="-2400" max="2400" value="0" step="1" class="flex-1">
+                    <span class="text-xs text-slate-500 font-mono w-8">-</span> <!-- Gets updated via JS -->
+                    <span class="text-xs text-slate-500 font-mono w-8 text-left">+2400</span>
+                </div>
+                <div class="flex justify-between text-[10px] text-slate-500 mt-1 uppercase tracking-wider">
+                    <span>-2 Octaves</span>
+                    <span>No Shift</span>
+                    <span>+2 Octaves</span>
+                </div>
+            </div>
+
+            <!-- Playback & Export Actions -->
+            <div class="flex justify-between items-center pt-2 border-t border-slate-700/50">
+                <div class="flex gap-3">
+                    <button id="btnPlay" class="w-12 h-12 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center transition-colors shadow-lg shadow-blue-900/20">
+                        <i data-lucide="play" class="w-5 h-5 ml-1"></i>
+                    </button>
+                    <button id="btnStop" class="w-12 h-12 bg-slate-700 hover:bg-slate-600 text-white rounded-full flex items-center justify-center transition-colors">
+                        <i data-lucide="square" class="w-4 h-4"></i>
+                    </button>
+                </div>
+                
+                <button id="btnExport" class="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors shadow-lg shadow-emerald-900/20">
+                    <i data-lucide="download" class="w-4 h-4"></i>
+                    <span>Export WAV</span>
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Overlay Loading -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center z-50 hidden">
+        <i data-lucide="loader-2" class="w-12 h-12 text-blue-500 animate-spin mb-4"></i>
+        <p class="text-lg font-medium" id="loadingText">Processing Audio...</p>
+    </div>
+
+    <script>
+        /* * For your Electron modular setup, move this script to js/main.js
+         */
+
+        // Initialize Icons
+        lucide.createIcons();
+
+        // --- UTILITY FUNCTIONS (Your requested code) --- //
+
+        function formatTime(seconds) {
+            if (!seconds && seconds !== 0) return "0:00";
+            const m = Math.floor(seconds / 60);
+            const s = Math.floor(seconds % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function bufferToWave(abuffer, len) {
+            const numOfChan = abuffer.numberOfChannels;
+            const length = len * numOfChan * 2 + 44;
+            const buffer = new ArrayBuffer(length);
+            const view = new DataView(buffer);
+            let pos = 0;
+
+            function setUint16(data) {
+                view.setUint16(pos, data, true);
+                pos += 2;
+            }
+
+            function setUint32(data) {
+                view.setUint32(pos, data, true);
+                pos += 4;
+            }
+
+            // Write WAV header
+            setUint32(0x46464952);                         // "RIFF"
+            setUint32(length - 8);                         // file length - 8
+            setUint32(0x45564157);                         // "WAVE"
+            setUint32(0x20746d66);                         // "fmt " chunk
+            setUint32(16);                                 // length = 16
+            setUint16(1);                                  // PCM (uncompressed)
+            setUint16(numOfChan);
+            setUint32(abuffer.sampleRate);
+            setUint32(abuffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+            setUint16(numOfChan * 2);                      // block-align
+            setUint16(16);                                 // 16-bit
+            setUint32(0x61746164);                         // "data" chunk
+            setUint32(len * numOfChan * 2);                // data length
+
+            // Write Interleaved Audio Data
+            const channels = [];
+            for (let i = 0; i < numOfChan; i++) {
+                channels.push(abuffer.getChannelData(i));
+            }
+
+            for (let sampleIdx = 0; sampleIdx < len; sampleIdx++) {
+                for (let ch = 0; ch < numOfChan; ch++) {
+                    let sample = Math.max(-1, Math.min(1, channels[ch][sampleIdx]));
+                    sample = sample < 0 ? sample * 0x8000 : sample * 0x7FFF;
+                    view.setInt16(pos, sample, true);
+                    pos += 2;
+                }
+            }
+
+            return new Blob([buffer], { type: "audio/wav" });
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.style.display = 'none';
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            }, 100);
+        }
+
+        // --- APP LOGIC --- //
+
+        // DOM Elements
+        const dropZone = document.getElementById('dropZone');
+        const dropPrompt = document.getElementById('dropPrompt');
+        const fileInput = document.getElementById('fileInput');
+        const controlsArea = document.getElementById('controlsArea');
+        const canvas = document.getElementById('visualizer');
+        const ctx = canvas.getContext('2d');
+        const timeDisplay = document.getElementById('timeDisplay');
+        const btnPlay = document.getElementById('btnPlay');
+        const btnStop = document.getElementById('btnStop');
+        const btnExport = document.getElementById('btnExport');
+        const centSlider = document.getElementById('centSlider');
+        const centInput = document.getElementById('centInput');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingText = document.getElementById('loadingText');
+
+        // Audio State
+        let audioCtx = null;
+        let originalBuffer = null;
+        let currentSource = null;
+        let isPlaying = false;
+        let startTime = 0;
+        let startOffset = 0;
+        let animationId = null;
+        let fileName = "shifted_audio.wav";
+
+        // Initialization
+        function initAudioContext() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        // Event Listeners for Drag and Drop
+        dropZone.addEventListener('click', () => fileInput.click());
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // UI Event Listeners
+        centSlider.addEventListener('input', (e) => {
+            centInput.value = e.target.value;
+            updatePitchLive();
+        });
+        centInput.addEventListener('change', (e) => {
+            let val = parseInt(e.target.value);
+            if (isNaN(val)) val = 0;
+            val = Math.max(-2400, Math.min(2400, val));
+            centInput.value = val;
+            centSlider.value = val;
+            updatePitchLive();
+        });
+
+        btnPlay.addEventListener('click', togglePlay);
+        btnStop.addEventListener('click', stopAudio);
+        btnExport.addEventListener('click', exportAudio);
+
+        // Core Functions
+        function showLoading(text) {
+            loadingText.textContent = text;
+            loadingOverlay.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            loadingOverlay.classList.add('hidden');
+        }
+
+        async function handleFile(file) {
+            if (!file.type.startsWith('audio/')) {
+                alert('Please upload a valid audio file.');
+                return;
+            }
+
+            fileName = file.name.replace(/\.[^/.]+$/, "") + "_shifted.wav";
+            showLoading('Decoding Audio...');
+            
+            try {
+                initAudioContext();
+                const arrayBuffer = await file.arrayBuffer();
+                originalBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                
+                // UI Updates
+                dropPrompt.classList.add('opacity-0');
+                canvas.classList.remove('opacity-0');
+                controlsArea.classList.remove('opacity-50', 'pointer-events-none');
+                
+                stopAudio();
+                drawWaveform(originalBuffer);
+                updateTimeDisplay(0, originalBuffer.duration);
+
+            } catch (err) {
+                console.error("Error decoding audio:", err);
+                alert("Could not read this audio file.");
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function drawWaveform(buffer) {
+            const width = canvas.width = dropZone.clientWidth;
+            const height = canvas.height = dropZone.clientHeight;
+            const data = buffer.getChannelData(0);
+            const step = Math.ceil(data.length / width);
+            const amp = height / 2;
+
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#1e293b'; // Slate 800
+            ctx.fillRect(0, 0, width, height);
+            
+            ctx.beginPath();
+            ctx.strokeStyle = '#3b82f6'; // Blue 500
+            ctx.lineWidth = 1;
+
+            for (let i = 0; i < width; i++) {
+                let min = 1.0;
+                let max = -1.0;
+                for (let j = 0; j < step; j++) {
+                    const datum = data[(i * step) + j]; 
+                    if (datum < min) min = datum;
+                    if (datum > max) max = datum;
+                }
+                ctx.moveTo(i, (1 + min) * amp);
+                ctx.lineTo(i, (1 + max) * amp);
+            }
+            ctx.stroke();
+        }
+
+        function playAudio() {
+            if (!originalBuffer) return;
+            initAudioContext();
+            
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            currentSource = audioCtx.createBufferSource();
+            currentSource.buffer = originalBuffer;
+            
+            // Apply Cent Shift
+            currentSource.detune.value = parseInt(centSlider.value);
+            
+            currentSource.connect(audioCtx.destination);
+            
+            currentSource.onended = () => {
+                if (isPlaying) stopAudio();
+            };
+
+            currentSource.start(0, startOffset);
+            startTime = audioCtx.currentTime - startOffset;
+            isPlaying = true;
+
+            // Update UI Icon
+            btnPlay.innerHTML = `<i data-lucide="pause" class="w-5 h-5"></i>`;
+            lucide.createIcons();
+            
+            updatePlaybackLoop();
+        }
+
+        function stopAudio() {
+            if (currentSource) {
+                currentSource.onended = null;
+                currentSource.stop();
+            }
+            isPlaying = false;
+            startOffset = 0;
+            cancelAnimationFrame(animationId);
+            
+            // Reset UI
+            btnPlay.innerHTML = `<i data-lucide="play" class="w-5 h-5 ml-1"></i>`;
+            lucide.createIcons();
+            
+            if (originalBuffer) {
+                updateTimeDisplay(0, getShiftedDuration());
+            }
+        }
+
+        function togglePlay() {
+            if (isPlaying) {
+                if (currentSource) currentSource.stop();
+                startOffset = audioCtx.currentTime - startTime;
+                isPlaying = false;
+                btnPlay.innerHTML = `<i data-lucide="play" class="w-5 h-5 ml-1"></i>`;
+                lucide.createIcons();
+                cancelAnimationFrame(animationId);
+            } else {
+                playAudio();
+            }
+        }
+
+        function updatePitchLive() {
+            if (currentSource && isPlaying) {
+                // Update node in real-time
+                currentSource.detune.value = parseInt(centSlider.value);
+            }
+            // Update time display as shifting changes duration
+            if (originalBuffer && !isPlaying) {
+                updateTimeDisplay(startOffset, getShiftedDuration());
+            }
+        }
+
+        function getShiftedDuration() {
+            if (!originalBuffer) return 0;
+            // detune rate formula: 2^(cents / 1200)
+            const cents = parseInt(centSlider.value);
+            const playbackRate = Math.pow(2, cents / 1200);
+            return originalBuffer.duration / playbackRate;
+        }
+
+        function updatePlaybackLoop() {
+            if (!isPlaying) return;
+            
+            const cents = parseInt(centSlider.value);
+            const rate = Math.pow(2, cents / 1200);
+            
+            // Calculate current time accounting for playback rate shifts during playback
+            // Note: For absolute precision during live sweeping, calculating exact position is complex. 
+            // We use standard elapsed time multiplied by rate for UI.
+            const elapsedRaw = audioCtx.currentTime - startTime;
+            const currentPosition = elapsedRaw * rate; 
+            
+            updateTimeDisplay(elapsedRaw, getShiftedDuration());
+            
+            // Draw Playhead
+            drawWaveform(originalBuffer);
+            const progress = currentPosition / originalBuffer.duration;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.fillRect(progress * canvas.width, 0, 2, canvas.height);
+
+            animationId = requestAnimationFrame(updatePlaybackLoop);
+        }
+
+        function updateTimeDisplay(current, total) {
+            timeDisplay.textContent = `${formatTime(current)} / ${formatTime(total)}`;
+        }
+
+        // --- EXPORT LOGIC --- //
+        async function exportAudio() {
+            if (!originalBuffer) return;
+            
+            stopAudio();
+            showLoading('Rendering Audio...');
+
+            // Small timeout to allow UI to paint the loading screen
+            setTimeout(async () => {
+                try {
+                    const cents = parseInt(centSlider.value);
+                    const rate = Math.pow(2, cents / 1200);
+                    const newLength = Math.ceil(originalBuffer.length / rate);
+
+                    // Render via OfflineAudioContext
+                    const offlineCtx = new OfflineAudioContext(
+                        originalBuffer.numberOfChannels,
+                        newLength,
+                        originalBuffer.sampleRate
+                    );
+
+                    const offlineSource = offlineCtx.createBufferSource();
+                    offlineSource.buffer = originalBuffer;
+                    offlineSource.detune.value = cents;
+                    
+                    offlineSource.connect(offlineCtx.destination);
+                    offlineSource.start();
+
+                    const renderedBuffer = await offlineCtx.startRendering();
+                    
+                    // Convert and Download using your provided functions
+                    showLoading('Generating WAV file...');
+                    const blob = bufferToWave(renderedBuffer, renderedBuffer.length);
+                    downloadBlob(blob, fileName);
+
+                } catch (err) {
+                    console.error("Export failed:", err);
+                    alert("Export failed. See console for details.");
+                } finally {
+                    hideLoading();
+                }
+            }, 50);
+        }
+
+        // Handle window resize for visualizer
+        window.addEventListener('resize', () => {
+            if (originalBuffer && !isPlaying) {
+                drawWaveform(originalBuffer);
+            }
+        });
+
+    </script>
+</body>
+</html>
