@@ -3,27 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Precise Cent Shifter</title>
+    <title>Precise Cent Shifter - Open Prototype</title>
+    
+    <!-- 
+      TAILWIND CDN
+      Used for rapid prototyping. For a production app, replace this with a compiled local CSS file.
+    -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- 
+      ========================================================================
+      CUSTOM STYLES
+      Move these to a separate style.css file if you modularize this project.
+      ========================================================================
+    -->
     <style>
-        /* * For your Electron modular setup, move this block to styles/style.css 
-         */
         body {
             background-color: #0f172a;
             color: #f8fafc;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            overflow: hidden; /* Prevent scrollbar in desktop app */
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden; 
+            user-select: none; /* Prevents text selection while holding the A/B bypass button */
         }
 
         .drop-zone {
-            transition: all 0.2s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             border: 2px dashed #334155;
         }
 
         .drop-zone.dragover {
             border-color: #3b82f6;
             background-color: rgba(59, 130, 246, 0.1);
+            transform: scale(1.01);
+        }
+
+        /* Pulsing glow when audio is playing */
+        .is-playing {
+            box-shadow: inset 0 0 40px rgba(59, 130, 246, 0.15);
+            border-color: rgba(59, 130, 246, 0.4);
         }
 
         /* Custom Slider Styling */
@@ -42,6 +59,11 @@
             cursor: pointer;
             margin-top: -8px;
             box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+            transition: transform 0.1s;
+        }
+
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
         }
 
         input[type=range]::-webkit-slider-runnable-track {
@@ -63,72 +85,98 @@
 </head>
 <body class="h-screen w-screen flex flex-col">
 
+    <!-- 
+      ========================================================================
+      HTML UI STRUCTURE
+      ========================================================================
+    -->
+
     <!-- Header -->
     <header class="bg-slate-800 p-4 border-b border-slate-700 flex justify-between items-center shadow-md z-10">
-        <div class="flex items-center gap-2">
-            <i data-lucide="waves" class="text-blue-500"></i>
-            <h1 class="text-xl font-bold tracking-wide">Precise Cent Shifter</h1>
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-500/20 p-2 rounded-lg text-blue-500">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="M2 6c.6 0 1.2-.2 1.8-.6.5-.4 1.2-.4 1.8 0 .6.4 1.2.6 1.8.6.6 0 1.2-.2 1.8-.6.5-.4 1.2-.4 1.8 0 .6.4 1.2.6 1.8.6"/><path d="M2 12c.6 0 1.2-.2 1.8-.6.5-.4 1.2-.4 1.8 0 .6.4 1.2.6 1.8.6.6 0 1.2-.2 1.8-.6.5-.4 1.2-.4 1.8 0 .6.4 1.2.6 1.8.6"/><path d="M2 18c.6 0 1.2-.2 1.8-.6.5-.4 1.2-.4 1.8 0 .6.4 1.2.6 1.8.6.6 0 1.2-.2 1.8-.6.5-.4 1.2-.4 1.8 0 .6.4 1.2.6 1.8.6"/></svg>
+            </div>
+            <div>
+                <h1 class="text-lg font-bold tracking-wide leading-tight">Precise Cent Shifter</h1>
+                <p class="text-xs text-slate-400 font-medium">Open Source Audio Prototype</p>
+            </div>
         </div>
-        <div class="text-sm text-slate-400 font-mono" id="timeDisplay">0:00 / 0:00</div>
+        <div class="text-sm text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-md border border-slate-700 shadow-inner" id="timeDisplay">0:00 / 0:00</div>
     </header>
 
-    <!-- Main Content -->
+    <!-- Main Content Area -->
     <main class="flex-1 flex flex-col p-6 gap-6 overflow-hidden">
         
-        <!-- Drop Zone & Visualizer Container -->
-        <div class="relative flex-1 bg-slate-800/50 rounded-xl border border-slate-700 flex flex-col overflow-hidden shadow-inner drop-zone" id="dropZone">
+        <!-- Drop Zone & Waveform Visualizer -->
+        <div class="relative flex-1 bg-slate-800/50 rounded-xl border border-slate-700 flex flex-col overflow-hidden shadow-inner drop-zone group" id="dropZone">
             
-            <!-- Default State -->
             <div id="dropPrompt" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 pointer-events-none transition-opacity duration-300">
-                <i data-lucide="upload-cloud" class="w-16 h-16 mb-4 text-slate-500"></i>
+                <div class="bg-slate-800 p-4 rounded-full mb-4 shadow-lg border border-slate-700 group-hover:bg-slate-700 transition-colors text-blue-400">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-10 h-10"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                </div>
                 <p class="text-lg font-medium text-slate-300">Drag & Drop Audio File</p>
-                <p class="text-sm mt-1">or click to browse</p>
+                <p class="text-sm mt-1">or click anywhere to browse</p>
             </div>
 
-            <!-- Canvas Visualizer -->
-            <canvas id="visualizer" class="w-full h-full opacity-0 transition-opacity duration-500"></canvas>
+            <canvas id="visualizer" class="w-full h-full opacity-0 transition-opacity duration-500 cursor-pointer"></canvas>
+            <div id="fileNameDisplay" class="absolute top-4 left-4 text-xs font-mono text-slate-300 bg-slate-900/90 px-3 py-1.5 rounded-md opacity-0 transition-opacity pointer-events-none z-10 border border-slate-700 shadow-md backdrop-blur-sm"></div>
             
             <input type="file" id="fileInput" class="hidden" accept="audio/*">
         </div>
 
-        <!-- Controls Area -->
+        <!-- Audio Controls (Slider, Buttons) -->
         <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 shadow-lg flex flex-col gap-6 opacity-50 pointer-events-none transition-opacity duration-300" id="controlsArea">
             
-            <!-- Cent Shifter Slider -->
             <div class="flex flex-col gap-2">
                 <div class="flex justify-between items-end">
-                    <label class="text-sm font-semibold text-slate-300">Pitch Shift (Cents)</label>
-                    <div class="flex items-center gap-2 bg-slate-900 px-3 py-1 rounded-md border border-slate-700">
-                        <input type="number" id="centInput" class="bg-transparent text-right w-16 text-blue-400 font-mono focus:outline-none" value="0" min="-2400" max="2400">
-                        <span class="text-slate-500 text-xs font-mono">¢</span>
+                    <label class="text-sm font-semibold text-slate-300 flex items-center gap-2">
+                        Pitch Shift
+                        <span class="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded cursor-help" title="Use Up/Down arrows to nudge. Hold Shift for 10x multiplier.">?</span>
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 bg-slate-900 px-3 py-1.5 rounded-md border border-slate-700 shadow-inner">
+                            <input type="number" id="centInput" class="bg-transparent text-right w-16 text-blue-400 font-mono focus:outline-none" value="0" min="-2400" max="2400">
+                            <span class="text-slate-500 text-xs font-mono">¢</span>
+                        </div>
+                        <button id="btnReset" class="p-2 text-slate-400 hover:text-white hover:bg-slate-700 rounded-md transition-colors" title="Reset to 0">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                        </button>
                     </div>
                 </div>
-                <div class="flex items-center gap-4">
+                <div class="flex items-center gap-4 mt-1">
                     <span class="text-xs text-slate-500 font-mono w-8 text-right">-2400</span>
                     <input type="range" id="centSlider" min="-2400" max="2400" value="0" step="1" class="flex-1">
-                    <span class="text-xs text-slate-500 font-mono w-8">-</span> <!-- Gets updated via JS -->
                     <span class="text-xs text-slate-500 font-mono w-8 text-left">+2400</span>
                 </div>
-                <div class="flex justify-between text-[10px] text-slate-500 mt-1 uppercase tracking-wider">
+                <div class="flex justify-between text-[10px] text-slate-500 mt-1 uppercase tracking-wider px-10">
                     <span>-2 Octaves</span>
                     <span>No Shift</span>
                     <span>+2 Octaves</span>
                 </div>
             </div>
 
-            <!-- Playback & Export Actions -->
-            <div class="flex justify-between items-center pt-2 border-t border-slate-700/50">
+            <!-- Action Buttons -->
+            <div class="flex justify-between items-center pt-2 border-t border-slate-700/50 gap-4">
                 <div class="flex gap-3">
-                    <button id="btnPlay" class="w-12 h-12 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center transition-colors shadow-lg shadow-blue-900/20">
-                        <i data-lucide="play" class="w-5 h-5 ml-1"></i>
+                    <button id="btnPlay" class="w-12 h-12 bg-blue-600 hover:bg-blue-500 text-white rounded-full flex items-center justify-center transition-all shadow-lg shadow-blue-900/20 active:scale-95">
+                        <svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 ml-1"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     </button>
-                    <button id="btnStop" class="w-12 h-12 bg-slate-700 hover:bg-slate-600 text-white rounded-full flex items-center justify-center transition-colors">
-                        <i data-lucide="square" class="w-4 h-4"></i>
+                    <button id="btnStop" class="w-12 h-12 bg-slate-700 hover:bg-slate-600 text-white rounded-full flex items-center justify-center transition-all active:scale-95">
+                        <svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><rect x="5" y="5" width="14" height="14" rx="2" ry="2"/></svg>
+                    </button>
+                    <button id="btnLoop" class="w-12 h-12 bg-slate-700 hover:bg-slate-600 text-slate-400 hover:text-white rounded-full flex items-center justify-center transition-all active:scale-95" title="Toggle Loop">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
                     </button>
                 </div>
                 
-                <button id="btnExport" class="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-colors shadow-lg shadow-emerald-900/20">
-                    <i data-lucide="download" class="w-4 h-4"></i>
+                <button id="btnBypass" class="flex-1 max-w-[200px] py-3 bg-slate-700 text-slate-400 font-medium rounded-lg transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-inner shadow-slate-900/50" title="Hold to bypass pitch shift (A/B Test)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span>Hold to Hear Original</span>
+                </button>
+
+                <button id="btnExport" class="flex items-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-medium rounded-lg transition-all shadow-lg shadow-emerald-900/20 active:scale-95 group">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 group-hover:-translate-y-0.5 transition-transform"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                     <span>Export WAV</span>
                 </button>
             </div>
@@ -136,21 +184,26 @@
 
     </main>
 
-    <!-- Overlay Loading -->
+    <!-- Overlay Loading Screen -->
     <div id="loadingOverlay" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex flex-col items-center justify-center z-50 hidden">
-        <i data-lucide="loader-2" class="w-12 h-12 text-blue-500 animate-spin mb-4"></i>
-        <p class="text-lg font-medium" id="loadingText">Processing Audio...</p>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-12 h-12 text-blue-500 animate-spin mb-4"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>
+        <p class="text-lg font-medium tracking-wide" id="loadingText">Processing Audio...</p>
     </div>
 
+    <!-- 
+      ========================================================================
+      JAVASCRIPT / LOGIC
+      Move this to js/script.js if you modularize this project.
+      ========================================================================
+    -->
     <script>
-        /* * For your Electron modular setup, move this script to js/main.js
-         */
+        // --- CONSTANTS & ICONS --- //
+        const iconPlay = `<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 ml-1"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+        const iconPause = `<svg viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
 
-        // Initialize Icons
-        lucide.createIcons();
-
-        // --- UTILITY FUNCTIONS (Your requested code) --- //
-
+        // --- CORE UTILITY FUNCTIONS --- //
+        
+        // Formats seconds into MM:SS
         function formatTime(seconds) {
             if (!seconds && seconds !== 0) return "0:00";
             const m = Math.floor(seconds / 60);
@@ -158,6 +211,7 @@
             return `${m}:${s.toString().padStart(2, '0')}`;
         }
 
+        // Converts raw AudioBuffer data into a valid WAV file blob for download
         function bufferToWave(abuffer, len) {
             const numOfChan = abuffer.numberOfChannels;
             const length = len * numOfChan * 2 + 44;
@@ -165,17 +219,10 @@
             const view = new DataView(buffer);
             let pos = 0;
 
-            function setUint16(data) {
-                view.setUint16(pos, data, true);
-                pos += 2;
-            }
+            function setUint16(data) { view.setUint16(pos, data, true); pos += 2; }
+            function setUint32(data) { view.setUint32(pos, data, true); pos += 4; }
 
-            function setUint32(data) {
-                view.setUint32(pos, data, true);
-                pos += 4;
-            }
-
-            // Write WAV header
+            // Write WAV header structure
             setUint32(0x46464952);                         // "RIFF"
             setUint32(length - 8);                         // file length - 8
             setUint32(0x45564157);                         // "WAVE"
@@ -190,12 +237,12 @@
             setUint32(0x61746164);                         // "data" chunk
             setUint32(len * numOfChan * 2);                // data length
 
-            // Write Interleaved Audio Data
             const channels = [];
             for (let i = 0; i < numOfChan; i++) {
                 channels.push(abuffer.getChannelData(i));
             }
 
+            // Write interleaved PCM audio data
             for (let sampleIdx = 0; sampleIdx < len; sampleIdx++) {
                 for (let ch = 0; ch < numOfChan; ch++) {
                     let sample = Math.max(-1, Math.min(1, channels[ch][sampleIdx]));
@@ -208,6 +255,7 @@
             return new Blob([buffer], { type: "audio/wav" });
         }
 
+        // Triggers the browser download popup
         function downloadBlob(blob, filename) {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -222,42 +270,52 @@
             }, 100);
         }
 
-        // --- APP LOGIC --- //
+        // --- APP STATE & DOM ELEMENTS --- //
 
-        // DOM Elements
         const dropZone = document.getElementById('dropZone');
         const dropPrompt = document.getElementById('dropPrompt');
         const fileInput = document.getElementById('fileInput');
         const controlsArea = document.getElementById('controlsArea');
         const canvas = document.getElementById('visualizer');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
         const ctx = canvas.getContext('2d');
         const timeDisplay = document.getElementById('timeDisplay');
         const btnPlay = document.getElementById('btnPlay');
         const btnStop = document.getElementById('btnStop');
+        const btnLoop = document.getElementById('btnLoop');
+        const btnBypass = document.getElementById('btnBypass');
         const btnExport = document.getElementById('btnExport');
         const centSlider = document.getElementById('centSlider');
         const centInput = document.getElementById('centInput');
+        const btnReset = document.getElementById('btnReset');
         const loadingOverlay = document.getElementById('loadingOverlay');
         const loadingText = document.getElementById('loadingText');
 
-        // Audio State
         let audioCtx = null;
         let originalBuffer = null;
         let currentSource = null;
+        let masterGain = null;
         let isPlaying = false;
-        let startTime = 0;
-        let startOffset = 0;
+        let isLooping = false;
+        let isBypassed = false;
+        
+        let originalFileNameBase = "";
+        
+        // Playback tracking logic variables
+        let lastTime = 0;
+        let currentPosition = 0; 
+        let startOffset = 0;     
         let animationId = null;
-        let fileName = "shifted_audio.wav";
 
-        // Initialization
+        // Ensure Web Audio API is initialized only after user gesture
         function initAudioContext() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             }
         }
 
-        // Event Listeners for Drag and Drop
+        // --- EVENT LISTENERS (INPUTS) --- //
+
         dropZone.addEventListener('click', () => fileInput.click());
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -267,21 +325,143 @@
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
-            if (e.dataTransfer.files.length) {
-                handleFile(e.dataTransfer.files[0]);
-            }
+            if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
         });
         fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length) {
-                handleFile(e.target.files[0]);
+            if (e.target.files.length) handleFile(e.target.files[0]);
+        });
+
+        // Click on the waveform to seek to a specific time
+        canvas.addEventListener('click', (e) => {
+            if (!originalBuffer) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const progress = x / rect.width;
+            
+            currentPosition = progress * originalBuffer.duration;
+            currentPosition = Math.min(currentPosition, originalBuffer.duration - 0.001);
+            
+            if (isPlaying) {
+                stopAudio(true); // Soft stop prevents clicking
+                startOffset = currentPosition;
+                setTimeout(playAudio, 20); 
+            } else {
+                startOffset = currentPosition;
+                updateVisualsForPosition();
             }
         });
 
-        // UI Event Listeners
+        // Keyboard Shortcuts (Space, Arrows)
+        window.addEventListener('keydown', (e) => {
+            if (!originalBuffer) return;
+            if (document.activeElement === centInput && e.code !== 'Enter') return; 
+
+            switch(e.code) {
+                case 'Space':
+                    e.preventDefault();
+                    togglePlay();
+                    break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    adjustCents(e.shiftKey ? 10 : 1);
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    adjustCents(e.shiftKey ? -10 : -1);
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    skipTime(-5);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    skipTime(5);
+                    break;
+            }
+        });
+
+        function adjustCents(amount) {
+            let val = parseInt(centInput.value) + amount;
+            val = Math.max(-2400, Math.min(2400, val));
+            centInput.value = val;
+            centSlider.value = val;
+            updatePitchLive();
+        }
+
+        function skipTime(seconds) {
+            currentPosition += seconds;
+            currentPosition = Math.max(0, Math.min(currentPosition, originalBuffer.duration - 0.001));
+            if (isPlaying) {
+                stopAudio(true);
+                startOffset = currentPosition;
+                setTimeout(playAudio, 20);
+            } else {
+                startOffset = currentPosition;
+                updateVisualsForPosition();
+            }
+        }
+
+        // A/B Reference Bypass Toggle
+        function toggleBypass(bypass) {
+            isBypassed = bypass;
+            if (bypass) {
+                btnBypass.classList.replace('bg-slate-700', 'bg-amber-600');
+                btnBypass.classList.replace('text-slate-400', 'text-white');
+                fileNameDisplay.textContent = `${originalFileNameBase} (ORIGINAL BYPASS)`;
+                fileNameDisplay.classList.add('text-amber-400');
+            } else {
+                btnBypass.classList.replace('bg-amber-600', 'bg-slate-700');
+                btnBypass.classList.replace('text-white', 'text-slate-400');
+                updateFileNameDisplay();
+                fileNameDisplay.classList.remove('text-amber-400');
+            }
+
+            if (currentSource && isPlaying) {
+                currentSource.detune.value = bypass ? 0 : parseInt(centSlider.value);
+            }
+            if (originalBuffer) updateVisualsForPosition();
+        }
+
+        btnBypass.addEventListener('mousedown', () => toggleBypass(true));
+        btnBypass.addEventListener('mouseup', () => toggleBypass(false));
+        btnBypass.addEventListener('mouseleave', () => toggleBypass(false));
+        btnBypass.addEventListener('touchstart', (e) => { e.preventDefault(); toggleBypass(true); });
+        btnBypass.addEventListener('touchend', (e) => { e.preventDefault(); toggleBypass(false); });
+
+        // Standard Button Actions
+        btnLoop.addEventListener('click', () => {
+            isLooping = !isLooping;
+            if (isLooping) {
+                btnLoop.classList.replace('text-slate-400', 'text-blue-400');
+                btnLoop.classList.replace('bg-slate-700', 'bg-slate-800');
+                btnLoop.classList.add('border', 'border-blue-500/50');
+            } else {
+                btnLoop.classList.replace('text-blue-400', 'text-slate-400');
+                btnLoop.classList.replace('bg-slate-800', 'bg-slate-700');
+                btnLoop.classList.remove('border', 'border-blue-500/50');
+            }
+            if (currentSource) currentSource.loop = isLooping;
+        });
+
+        btnReset.addEventListener('click', () => {
+            centInput.value = 0;
+            centSlider.value = 0;
+            updatePitchLive();
+        });
+
         centSlider.addEventListener('input', (e) => {
             centInput.value = e.target.value;
             updatePitchLive();
         });
+
+        centInput.addEventListener('input', (e) => {
+            let val = parseInt(e.target.value);
+            if (isNaN(val)) return; 
+            val = Math.max(-2400, Math.min(2400, val));
+            centSlider.value = val;
+            updatePitchLive();
+        });
+
         centInput.addEventListener('change', (e) => {
             let val = parseInt(e.target.value);
             if (isNaN(val)) val = 0;
@@ -292,10 +472,11 @@
         });
 
         btnPlay.addEventListener('click', togglePlay);
-        btnStop.addEventListener('click', stopAudio);
+        btnStop.addEventListener('click', () => stopAudio(false));
         btnExport.addEventListener('click', exportAudio);
 
-        // Core Functions
+        // --- MAIN AUDIO ENGINE --- //
+
         function showLoading(text) {
             loadingText.textContent = text;
             loadingOverlay.classList.remove('hidden');
@@ -305,13 +486,19 @@
             loadingOverlay.classList.add('hidden');
         }
 
+        function updateFileNameDisplay() {
+            const cents = parseInt(centSlider.value);
+            const sign = cents > 0 ? '+' : '';
+            const suffix = cents === 0 ? '' : ` [${sign}${cents}¢]`;
+            fileNameDisplay.textContent = `${originalFileNameBase}${suffix}`;
+        }
+
         async function handleFile(file) {
-            if (!file.type.startsWith('audio/')) {
-                alert('Please upload a valid audio file.');
-                return;
+            if (file.type && !file.type.startsWith('audio/') && !file.type.startsWith('video/')) {
+                console.warn('Unknown file type, attempting to decode anyway...', file.type);
             }
 
-            fileName = file.name.replace(/\.[^/.]+$/, "") + "_shifted.wav";
+            originalFileNameBase = file.name.replace(/\.[^/.]+$/, "");
             showLoading('Decoding Audio...');
             
             try {
@@ -319,175 +506,229 @@
                 const arrayBuffer = await file.arrayBuffer();
                 originalBuffer = await audioCtx.decodeAudioData(arrayBuffer);
                 
-                // UI Updates
+                updateFileNameDisplay();
+                fileNameDisplay.classList.remove('opacity-0');
                 dropPrompt.classList.add('opacity-0');
                 canvas.classList.remove('opacity-0');
                 controlsArea.classList.remove('opacity-50', 'pointer-events-none');
                 
-                stopAudio();
+                stopAudio(false);
                 drawWaveform(originalBuffer);
                 updateTimeDisplay(0, originalBuffer.duration);
 
             } catch (err) {
                 console.error("Error decoding audio:", err);
-                alert("Could not read this audio file.");
+                alert("Could not read this audio file. The browser may not support this format.");
             } finally {
                 hideLoading();
             }
         }
 
+        // Renders the AudioBuffer into the Canvas element
         function drawWaveform(buffer) {
             const width = canvas.width = dropZone.clientWidth;
             const height = canvas.height = dropZone.clientHeight;
             const data = buffer.getChannelData(0);
             const step = Math.ceil(data.length / width);
+            const mid = height / 2;
             const amp = height / 2;
 
             ctx.clearRect(0, 0, width, height);
-            ctx.fillStyle = '#1e293b'; // Slate 800
+            
+            // Dark gradient background
+            const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
+            bgGradient.addColorStop(0, '#0f172a');
+            bgGradient.addColorStop(0.5, '#1e293b');
+            bgGradient.addColorStop(1, '#0f172a');
+            ctx.fillStyle = bgGradient;
             ctx.fillRect(0, 0, width, height);
             
-            ctx.beginPath();
-            ctx.strokeStyle = '#3b82f6'; // Blue 500
-            ctx.lineWidth = 1;
+            // Bright blue gradient for the waveform itself
+            const gradient = ctx.createLinearGradient(0, 0, 0, height);
+            gradient.addColorStop(0, '#60a5fa');
+            gradient.addColorStop(0.5, '#2563eb');
+            gradient.addColorStop(1, '#60a5fa');
 
+            ctx.beginPath();
+            ctx.moveTo(0, mid);
+
+            // Draw Top Half
             for (let i = 0; i < width; i++) {
-                let min = 1.0;
-                let max = -1.0;
+                let max = 0;
                 for (let j = 0; j < step; j++) {
-                    const datum = data[(i * step) + j]; 
-                    if (datum < min) min = datum;
+                    const datum = Math.abs(data[(i * step) + j]); 
                     if (datum > max) max = datum;
                 }
-                ctx.moveTo(i, (1 + min) * amp);
-                ctx.lineTo(i, (1 + max) * amp);
+                ctx.lineTo(i, mid - (max * amp * 0.9));
             }
-            ctx.stroke();
+            
+            // Draw Bottom Half (Reversed)
+            for (let i = width - 1; i >= 0; i--) {
+                let max = 0;
+                for (let j = 0; j < step; j++) {
+                    const datum = Math.abs(data[(i * step) + j]); 
+                    if (datum > max) max = datum;
+                }
+                ctx.lineTo(i, mid + (max * amp * 0.9));
+            }
+
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
         }
 
         function playAudio() {
             if (!originalBuffer) return;
             initAudioContext();
             
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            if (startOffset >= originalBuffer.duration) startOffset = 0;
 
             currentSource = audioCtx.createBufferSource();
             currentSource.buffer = originalBuffer;
             
-            // Apply Cent Shift
-            currentSource.detune.value = parseInt(centSlider.value);
+            // GainNode to prevent audio popping when starting/stopping abruptly
+            masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            masterGain.gain.linearRampToValueAtTime(1, audioCtx.currentTime + 0.015); 
             
-            currentSource.connect(audioCtx.destination);
+            // Apply Shift
+            currentSource.detune.value = isBypassed ? 0 : parseInt(centSlider.value);
+            currentSource.loop = isLooping;
+            
+            currentSource.connect(masterGain);
+            masterGain.connect(audioCtx.destination);
             
             currentSource.onended = () => {
-                if (isPlaying) stopAudio();
+                if (!isLooping && isPlaying) stopAudio(false);
             };
 
             currentSource.start(0, startOffset);
-            startTime = audioCtx.currentTime - startOffset;
+            
+            lastTime = audioCtx.currentTime;
+            currentPosition = startOffset;
             isPlaying = true;
 
-            // Update UI Icon
-            btnPlay.innerHTML = `<i data-lucide="pause" class="w-5 h-5"></i>`;
-            lucide.createIcons();
+            dropZone.classList.add('is-playing');
+            btnPlay.innerHTML = iconPause;
             
             updatePlaybackLoop();
         }
 
-        function stopAudio() {
+        function stopAudio(softStop = true) {
             if (currentSource) {
-                currentSource.onended = null;
-                currentSource.stop();
+                currentSource.onended = null; 
+                
+                if (softStop && masterGain) {
+                    masterGain.gain.setValueAtTime(masterGain.gain.value, audioCtx.currentTime);
+                    masterGain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.015);
+                    const sourceRef = currentSource;
+                    setTimeout(() => { try { sourceRef.stop(); } catch(e){} }, 20);
+                } else {
+                    try { currentSource.stop(); } catch(e){}
+                }
             }
+            
             isPlaying = false;
-            startOffset = 0;
+            if (!softStop) {
+                startOffset = 0;
+                currentPosition = 0;
+            }
             cancelAnimationFrame(animationId);
             
-            // Reset UI
-            btnPlay.innerHTML = `<i data-lucide="play" class="w-5 h-5 ml-1"></i>`;
-            lucide.createIcons();
+            dropZone.classList.remove('is-playing');
+            btnPlay.innerHTML = iconPlay;
             
-            if (originalBuffer) {
-                updateTimeDisplay(0, getShiftedDuration());
-            }
+            if (originalBuffer) updateVisualsForPosition();
         }
 
         function togglePlay() {
             if (isPlaying) {
-                if (currentSource) currentSource.stop();
-                startOffset = audioCtx.currentTime - startTime;
-                isPlaying = false;
-                btnPlay.innerHTML = `<i data-lucide="play" class="w-5 h-5 ml-1"></i>`;
-                lucide.createIcons();
-                cancelAnimationFrame(animationId);
+                startOffset = currentPosition; 
+                stopAudio(true); 
             } else {
                 playAudio();
             }
         }
 
         function updatePitchLive() {
-            if (currentSource && isPlaying) {
-                // Update node in real-time
+            if (currentSource && isPlaying && !isBypassed) {
                 currentSource.detune.value = parseInt(centSlider.value);
             }
-            // Update time display as shifting changes duration
-            if (originalBuffer && !isPlaying) {
-                updateTimeDisplay(startOffset, getShiftedDuration());
-            }
+            if (!isBypassed) updateFileNameDisplay();
+            if (originalBuffer && !isPlaying) updateVisualsForPosition();
         }
 
         function getShiftedDuration() {
             if (!originalBuffer) return 0;
-            // detune rate formula: 2^(cents / 1200)
-            const cents = parseInt(centSlider.value);
-            const playbackRate = Math.pow(2, cents / 1200);
-            return originalBuffer.duration / playbackRate;
+            const cents = isBypassed ? 0 : parseInt(centSlider.value);
+            const rate = Math.pow(2, cents / 1200);
+            return originalBuffer.duration / rate;
         }
 
+        // Frame loop to visually move the playhead line
         function updatePlaybackLoop() {
             if (!isPlaying) return;
             
-            const cents = parseInt(centSlider.value);
+            const now = audioCtx.currentTime;
+            const delta = now - lastTime;
+            lastTime = now;
+
+            const cents = isBypassed ? 0 : parseInt(centSlider.value);
             const rate = Math.pow(2, cents / 1200);
             
-            // Calculate current time accounting for playback rate shifts during playback
-            // Note: For absolute precision during live sweeping, calculating exact position is complex. 
-            // We use standard elapsed time multiplied by rate for UI.
-            const elapsedRaw = audioCtx.currentTime - startTime;
-            const currentPosition = elapsedRaw * rate; 
+            currentPosition += delta * rate;
+
+            if (isLooping && currentPosition >= originalBuffer.duration) {
+                currentPosition = currentPosition % originalBuffer.duration;
+            }
+
+            updateVisualsForPosition();
+            animationId = requestAnimationFrame(updatePlaybackLoop);
+        }
+
+        function updateVisualsForPosition() {
+            const cents = isBypassed ? 0 : parseInt(centSlider.value);
+            const rate = Math.pow(2, cents / 1200);
             
-            updateTimeDisplay(elapsedRaw, getShiftedDuration());
-            
-            // Draw Playhead
+            const displayedCurrent = currentPosition / rate;
+            const displayedTotal = getShiftedDuration();
+
+            updateTimeDisplay(displayedCurrent, displayedTotal);
+
             drawWaveform(originalBuffer);
             const progress = currentPosition / originalBuffer.duration;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            
+            ctx.fillStyle = '#f8fafc'; 
             ctx.fillRect(progress * canvas.width, 0, 2, canvas.height);
-
-            animationId = requestAnimationFrame(updatePlaybackLoop);
+            
+            ctx.shadowColor = '#60a5fa';
+            ctx.shadowBlur = 10;
+            ctx.fillRect(progress * canvas.width, 0, 2, canvas.height);
+            ctx.shadowBlur = 0; 
         }
 
         function updateTimeDisplay(current, total) {
             timeDisplay.textContent = `${formatTime(current)} / ${formatTime(total)}`;
         }
 
-        // --- EXPORT LOGIC --- //
+        // --- EXPORT TO WAV --- //
+
         async function exportAudio() {
             if (!originalBuffer) return;
             
-            stopAudio();
+            const wasPlaying = isPlaying;
+            if (wasPlaying) stopAudio(false);
             showLoading('Rendering Audio...');
 
-            // Small timeout to allow UI to paint the loading screen
+            // Small delay so the DOM can update the loading screen overlay
             setTimeout(async () => {
                 try {
                     const cents = parseInt(centSlider.value);
                     const rate = Math.pow(2, cents / 1200);
                     const newLength = Math.ceil(originalBuffer.length / rate);
 
-                    // Render via OfflineAudioContext
+                    // Offline rendering context calculates the math instantly without waiting for playback
                     const offlineCtx = new OfflineAudioContext(
                         originalBuffer.numberOfChannels,
                         newLength,
@@ -503,10 +744,14 @@
 
                     const renderedBuffer = await offlineCtx.startRendering();
                     
-                    // Convert and Download using your provided functions
+                    // Generate a smart file name automatically
+                    const sign = cents > 0 ? '+' : '';
+                    const shiftSuffix = cents === 0 ? '' : `_${sign}${cents}c`;
+                    const exportFileName = `${originalFileNameBase}${shiftSuffix}.wav`;
+
                     showLoading('Generating WAV file...');
                     const blob = bufferToWave(renderedBuffer, renderedBuffer.length);
-                    downloadBlob(blob, fileName);
+                    downloadBlob(blob, exportFileName);
 
                 } catch (err) {
                     console.error("Export failed:", err);
@@ -517,10 +762,10 @@
             }, 50);
         }
 
-        // Handle window resize for visualizer
+        // Redraw waveform gracefully if the user resizes their browser window
         window.addEventListener('resize', () => {
             if (originalBuffer && !isPlaying) {
-                drawWaveform(originalBuffer);
+                updateVisualsForPosition();
             }
         });
 
